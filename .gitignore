@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.py[cod]
+.codex_tmp/
+
+logs/
+uploads/
+certs/
+
+*.before-emp-code.xlsx
+*.xlsx
+
+server.out.log
+server.err.log

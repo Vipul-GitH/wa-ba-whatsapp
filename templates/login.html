@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login · ARPRA WhatsApp Communication Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="loginBody">
+    <main class="loginShell">
+      <section class="loginPanel">
+        <div>
+          <h1>ARPRA WhatsApp Console</h1>
+          <p>Sign in to manage ownership, notes, closure, and reassignment.</p>
+        </div>
+        {% if error %}
+          <div class="loginError">{{ error }}</div>
+        {% endif %}
+        <form class="loginForm" method="post" action="{{ url_for('login') }}">
+          <label>
+            Username
+            <input name="username" autocomplete="username" required />
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button class="applyBtn" type="submit">Login</button>
+        </form>
+        <div class="loginUsers">
+          <strong>Prototype users</strong>
+          <span>suresh / suresh123</span>
+          <span>frontdesk / front123</span>
+          <span>admin / admin123</span>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

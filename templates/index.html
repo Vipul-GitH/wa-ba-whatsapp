@@ -1,0 +1,227 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ARPRA WhatsApp Communication Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="appShell" data-provider="{{ provider }}" data-current-user-id="{{ current_user.id }}" data-current-user-name="{{ current_user.display_name }}">
+      <div class="toast hidden" id="toast"></div>
+
+
+      <section class="titleRow titleActionsOnly">
+        <div class="pageActions">
+          <span class="userBadge">{{ current_user.display_name }}</span>
+          <input id="dateInput" class="dateControl" type="date" />
+          <button class="layoutToggle active" id="toggleQueues" type="button">Hide Queues</button>
+          <button class="layoutToggle active" id="toggleChatList" type="button">Hide Chat List</button>
+          <button class="outlineBtn" type="button">+ New Conversation</button>
+          <form class="logoutForm" method="post" action="{{ url_for('logout') }}">
+            <button class="layoutToggle" type="submit">Logout</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="hubGrid" id="hubGrid">
+        <aside class="queueSidebar">
+          <div class="sidebarSearch">
+            <span class="uiIcon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m16.5 16.5 4 4"></path></svg>
+            </span>
+            <input id="searchInput" placeholder="Search chat, patient, mobile" />
+          </div>
+          <nav id="queueNav">
+            <button class="active" type="button" data-queue="All Chats"><span>All Chats</span><strong>0</strong></button>
+            <button type="button" data-queue="Unassigned"><span>Unassigned</span><strong>0</strong></button>
+            <button type="button" data-queue="My Chats"><span>My Chats</span><strong>0</strong></button>
+            <button type="button" data-queue="Team Chats"><span>Team Chats</span><strong>0</strong></button>
+            <button type="button" data-queue="Waiting For Patient"><span>Waiting For Patient</span><strong>0</strong></button>
+            <button type="button" data-queue="SLA Breached"><span>SLA Breached</span><strong>0</strong></button>
+            <button type="button" data-queue="Archived"><span>Archived</span><strong>0</strong></button>
+          </nav>
+          <div class="slaLegend">
+            <h3>Phase 1 SLA</h3>
+            <span><i class="dot green"></i> Reply &lt; 5 min</span>
+            <span><i class="dot amber"></i> Reply 5-15 min</span>
+            <span><i class="dot red"></i> Reply &gt; 15 min</span>
+            <span><i class="dot breach"></i> Breached &gt; 30 min</span>
+          </div>
+        </aside>
+
+        <section class="conversationList">
+          <div class="listHeader">
+            <h2 id="activeQueueLabel">All Chats</h2>
+            <div class="compactFilters">
+              <label class="selectWrap">
+                <select id="slaFilter">
+                  <option>SLA</option>
+                  <option>Green</option>
+                  <option>Amber</option>
+                  <option>Red</option>
+                  <option>Breached</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="chatRows" id="conversationList">
+            <div class="emptyLink">Loading conversations...</div>
+          </div>
+        </section>
+
+        <section class="chatPanel hubChat">
+          <div class="customerHeader">
+            <div class="waIcon">WA</div>
+            <div>
+              <h2 id="activeMobile">No conversation selected</h2>
+              <p id="activeSummary">Select a patient conversation to open the thread.</p>
+              <div class="ownerLine" id="ownerLine">
+                <span class="status unassigned">Unassigned</span>
+                <span>Owner: None</span>
+                <span>Last reply: -</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="ownershipBar">
+            <div>
+              <strong>SLA Status</strong>
+              <span id="slaStatus">-</span>
+            </div>
+            <div>
+              <strong>Taken At</strong>
+              <span id="takenAt">Not taken</span>
+            </div>
+            <div>
+              <strong>Conversation Type</strong>
+              <div class="typeControl">
+                <select class="typeSelect" id="typeSelect">
+                  <option>Report</option>
+                  <option>Invoice</option>
+                  <option>Lead</option>
+                  <option>Complaint</option>
+                  <option>Home Collection</option>
+                  <option>Doctor</option>
+                  <option>Pickup</option>
+                  <option>Other</option>
+                </select>
+                <button class="saveTypeBtn saved" id="saveTypeBtn" type="button">Saved</button>
+              </div>
+            </div>
+            <button class="applyBtn" id="takeBtn" type="button">Take Ownership</button>
+            <button class="closeBtn" id="closeBtn" type="button">Close Conversation</button>
+          </div>
+
+          <div class="thread" id="messages">
+            <span class="dateDivider">Today</span>
+            <div class="emptyLink">Select a patient conversation to view messages.</div>
+          </div>
+
+          <div class="composer">
+            <form class="composerRow" id="replyForm">
+              <button class="composerTool" type="button" id="emojiBtn" title="Open professional emoji picker" aria-label="Open professional emoji picker">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path></svg>
+              </button>
+              <button class="composerTool" type="button" id="attachBtn" title="Attach work file" aria-label="Attach work file">
+                <svg viewBox="0 0 24 24"><path d="m21.4 11.6-8.8 8.8a6 6 0 0 1-8.5-8.5l9.4-9.4a4 4 0 0 1 5.7 5.7l-9.4 9.4a2 2 0 0 1-2.8-2.8l8.8-8.8"></path></svg>
+              </button>
+              <input id="fileInput" class="hiddenFileInput" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" />
+              <button class="composerTool" type="button" id="dictBtn" title="Open local reply dictionary" aria-label="Open local reply dictionary">
+                <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"></path><path d="M8 7h8"></path><path d="M8 11h6"></path></svg>
+              </button>
+              <input id="replyText" placeholder="Take ownership to reply..." disabled />
+              <button class="sendBtn" id="sendBtn" type="submit" aria-label="Send WhatsApp message" disabled>
+                <svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>
+              </button>
+            </form>
+            <div class="assistPanel hidden" id="assistPanel"></div>
+          </div>
+        </section>
+
+        <aside class="contextWorkspace">
+          <header>
+            <h2>Context Workspace</h2>
+            <span>Patient, ticket, lead, collection, and audit context</span>
+          </header>
+          <section class="contextBlock quickBlock">
+            <h3>Fast Actions</h3>
+            <div class="actionGrid">
+              <button type="button" data-drawer="Link"><span class="actionIcon">↔</span>Link</button>
+              <button type="button" data-drawer="Create"><span class="actionIcon">+</span>Create</button>
+              <button type="button" data-drawer="Add Note"><span class="actionIcon">□</span>Add Note</button>
+              <button type="button" data-drawer="Add Tag"><span class="actionIcon">#</span>Add Tag</button>
+              <button type="button" data-drawer="Reassign"><span class="actionIcon">↪</span>Reassign</button>
+            </div>
+          </section>
+          <section class="patientTagsBlock">
+            <div>
+              <h3>Conversation Type & Tags</h3>
+              <p id="tagNote">Live from WhatsApp table</p>
+            </div>
+            <div class="prominentTagList" id="tagStrip"></div>
+          </section>
+          <div class="contextScroll">
+            <section class="contextBlock">
+              <h3>Linked Contact</h3>
+              <article class="entityCard">
+                <strong id="contactName">No conversation selected</strong>
+                <dl class="keyValues" id="contactContext">
+                  <div><dt>Mobile</dt><dd>-</dd></div>
+                  <div><dt>Last Message</dt><dd>-</dd></div>
+                  <div><dt>Provider</dt><dd>{{ provider }}</dd></div>
+                </dl>
+              </article>
+            </section>
+            <section class="contextBlock">
+              <h3>Open Tickets</h3>
+              <div class="miniRecords" id="ticketList">
+                <p class="emptyLink">Select a conversation.</p>
+              </div>
+            </section>
+            <section class="contextBlock">
+              <h3>Home Collections</h3>
+              <div class="miniRecords" id="homeCollectionList">
+                <p class="emptyLink">Select a conversation.</p>
+              </div>
+            </section>
+            <section class="contextBlock">
+              <h3>Leads</h3>
+              <div class="miniRecords" id="leadList">
+                <p class="emptyLink">Select a conversation.</p>
+              </div>
+            </section>
+            <section class="contextBlock">
+              <h3>Audit Summary</h3>
+              <p class="contextText" id="auditSummary">Open a conversation to see ownership, status, and delivery details.</p>
+            </section>
+          </div>
+        </aside>
+      </section>
+
+      <div class="drawerBackdrop hidden" id="drawerBackdrop">
+        <aside class="sideDrawer">
+          <header>
+            <div>
+              <h2 id="drawerTitle">Action</h2>
+              <p>Side drawer workflow · no full-page navigation.</p>
+            </div>
+            <button id="drawerClose" type="button" aria-label="Close drawer">×</button>
+          </header>
+          <div class="drawerBody">
+            <div id="drawerQuestion"></div>
+            <div id="drawerFields"></div>
+            <p class="drawerHint">Chat reference will be stored automatically.</p>
+          </div>
+          <footer>
+            <button class="layoutToggle" id="drawerCancel" type="button">Cancel</button>
+            <button class="applyBtn" id="drawerSave" type="button">Save</button>
+          </footer>
+        </aside>
+      </div>
+    </main>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
+
+
