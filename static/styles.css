@@ -8,6 +8,33 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #aab8ca #eef3f8;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #eef3f8;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 2px solid #eef3f8;
+  border-radius: 999px;
+  background: #aab8ca;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #8495aa;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 body {
@@ -808,6 +835,24 @@ h1 {
   box-shadow: none;
 }
 
+.loadOlderBtn {
+  align-self: center;
+  border: 1px solid #d5dde8;
+  background: #fff;
+  color: #28517f;
+  border-radius: 999px;
+  padding: 7px 13px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(14, 31, 53, 0.08);
+}
+
+.loadOlderBtn:hover {
+  border-color: #9bb7df;
+  background: #f5f9ff;
+}
+
 .bubble {
   width: fit-content;
   max-width: 82%;
@@ -928,6 +973,36 @@ h1 {
   border: 1px solid #d9e2ef;
   border-radius: 7px;
   background: #f6f8fb;
+}
+
+.audioBubble {
+  display: grid;
+  gap: 6px;
+  min-width: min(300px, 72vw);
+  max-width: 100%;
+}
+
+.audioBubble strong {
+  color: #142039;
+  font-size: 12px;
+}
+
+.audioBubble audio {
+  width: 100%;
+  height: 34px;
+}
+
+.videoBubble {
+  max-width: 280px;
+}
+
+.videoBubble video {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  border: 1px solid #d9e2ef;
+  border-radius: 7px;
+  background: #111827;
 }
 
 .hiddenFileInput {
@@ -1242,6 +1317,45 @@ h1 {
   font-weight: 800;
 }
 
+.auditList {
+  display: grid;
+  gap: 6px;
+}
+
+.auditItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
+  gap: 3px 8px;
+  padding: 7px 8px;
+  border: 1px solid #e2e7ef;
+  border-radius: 6px;
+  background: #fbfcfe;
+  font-size: 11px;
+}
+
+.auditItem strong {
+  min-width: 0;
+  color: #142039;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auditItem span {
+  color: #526176;
+  font-weight: 800;
+}
+
+.auditItem time {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  color: #66758b;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .entityCard > strong {
   display: block;
   margin-bottom: 6px;
@@ -1272,6 +1386,50 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.keyValues .linkedPatientRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 6px;
+  padding: 7px 8px;
+  border: 1px solid #e1e8f2;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.keyValues .linkedPatientRow:last-child {
+  margin-bottom: 0;
+}
+
+.linkedPatientRow dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #263b5e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linkedPatientRow dt span {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #0059dd;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.linkedPatientRow dd {
+  white-space: nowrap;
+}
+
 .emptyLink,
 .contextText {
   margin: 0;
@@ -1293,6 +1451,11 @@ h1 {
 .sla.green {
   color: #0b7a45;
   background: #dcf7e8;
+}
+
+.sla.replied {
+  color: #66758b;
+  background: #f3f6fa;
 }
 
 .sla.amber {
@@ -1864,6 +2027,48 @@ h1 {
   }
 }
 
+/* Keep chat controls visible on dense desktop widths. */
+.ownershipBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.ownershipBar > div:nth-child(1),
+.ownershipBar > div:nth-child(2) {
+  flex: 0 1 82px;
+}
+
+.ownershipBar > div:nth-child(3) {
+  flex: 1 1 220px;
+}
+
+.ownershipBar > button {
+  flex: 0 0 auto;
+}
+
+.ownershipBar .typeControl {
+  grid-template-columns: minmax(92px, 1fr) minmax(78px, auto);
+}
+
+.ownershipBar .applyBtn,
+.ownershipBar .closeBtn {
+  padding-inline: 10px;
+}
+
+@media (min-width: 1081px) and (max-width: 1320px) {
+  .hubGrid,
+  .hubGrid.queuesHidden,
+  .hubGrid.listHidden,
+  .hubGrid.queuesHidden.listHidden {
+    grid-template-columns: 300px minmax(430px, 1fr) 300px;
+  }
+
+  .ownershipBar {
+    gap: 6px;
+  }
+}
+
 @media (max-width: 420px) {
   :root {
     font-size: 13px;
@@ -1909,5 +2114,282 @@ h1 {
 
   .sideDrawer {
     width: 100vw;
+  }
+}
+
+/* Workspace refactor: queue rail + 3-column WhatsApp workbench */
+.appShell {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.titleActionsOnly {
+  padding: 10px 16px 8px;
+}
+
+.hubGrid,
+.hubGrid.queuesHidden,
+.hubGrid.listHidden,
+.hubGrid.queuesHidden.listHidden {
+  grid-template-columns: 330px minmax(420px, 1fr) 340px;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.queueSidebar {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(210px, 300px) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+}
+
+.queueSidebar nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 0;
+  overflow: visible;
+  padding-bottom: 0;
+}
+
+.queueSidebar nav button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 74px;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid #d8e1ee;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.queueSidebar nav svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.queueSidebar nav button.active {
+  border-color: #06152e;
+}
+
+.queueSidebar nav strong {
+  min-width: 20px;
+  min-height: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #eef4fb;
+  color: #0b2e66;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.queueSidebar nav button.active strong {
+  background: #fff;
+  color: #06152e;
+}
+
+.slaLegend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 0;
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+.slaLegend h3 {
+  margin: 0;
+}
+
+.slaLegend span {
+  margin: 0;
+}
+
+.conversationList,
+.chatPanel,
+.contextWorkspace {
+  min-height: 0;
+}
+
+.chatPanel {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.customerHeader {
+  min-height: 56px;
+  padding: 8px 12px;
+}
+
+.ownershipBar {
+  grid-template-columns: minmax(80px, .55fr) minmax(90px, .6fr) minmax(190px, 1fr) minmax(128px, auto) minmax(134px, auto);
+  gap: 7px;
+  padding: 7px 12px;
+}
+
+.ownershipBar strong {
+  font-size: 10px;
+}
+
+.typeSelect,
+.saveTypeBtn {
+  min-height: 28px;
+}
+
+.applyBtn,
+.closeBtn {
+  min-height: 32px;
+}
+
+.applyBtn svg {
+  width: 15px;
+  height: 15px;
+  margin-right: 6px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: -2px;
+}
+
+.contextWorkspace {
+  grid-template-rows: auto auto auto auto 1fr;
+}
+
+.contextWorkspace > header {
+  padding: 10px 12px;
+}
+
+.quickBlock,
+.patientTagsBlock {
+  margin: 8px 8px 0;
+}
+
+.patientTagsBlock {
+  padding: 9px;
+}
+
+.contextTabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  padding: 8px 8px 0;
+}
+
+.contextTabs button {
+  min-height: 30px;
+  border: 1px solid #d8e1ee;
+  border-radius: 6px;
+  background: #fff;
+  color: #344057;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.contextTabs button.active {
+  border-color: #0059dd;
+  background: #eef5ff;
+  color: #0059dd;
+}
+
+.contextPanel {
+  display: none;
+}
+
+.contextPanel.active {
+  display: block;
+}
+
+.contextScroll {
+  padding: 8px;
+}
+
+.contextBlock {
+  margin-bottom: 0;
+}
+
+@media (max-width: 1360px) {
+  .hubGrid,
+  .hubGrid.queuesHidden,
+  .hubGrid.listHidden,
+  .hubGrid.queuesHidden.listHidden {
+    grid-template-columns: 300px minmax(360px, 1fr) 310px;
+  }
+
+  .queueSidebar {
+    grid-template-columns: minmax(200px, 280px) minmax(0, 1fr);
+  }
+
+  .slaLegend {
+    display: none;
+  }
+}
+
+@media (max-width: 1080px) {
+  .hubGrid,
+  .hubGrid.queuesHidden,
+  .hubGrid.listHidden,
+  .hubGrid.queuesHidden.listHidden {
+    grid-template-columns: minmax(300px, .42fr) minmax(360px, 1fr);
+    grid-template-rows: auto minmax(460px, auto) minmax(420px, auto);
+  }
+
+  .queueSidebar,
+  .contextWorkspace {
+    grid-column: 1 / -1;
+  }
+
+  .chatPanel {
+    grid-column: 2;
+    min-height: 620px;
+  }
+
+  .conversationList {
+    grid-column: 1;
+    min-height: 620px;
+  }
+
+  .contextWorkspace {
+    min-height: 420px;
+  }
+}
+
+@media (max-width: 720px) {
+  .hubGrid,
+  .hubGrid.queuesHidden,
+  .hubGrid.listHidden,
+  .hubGrid.queuesHidden.listHidden {
+    grid-template-columns: 1fr;
+  }
+
+  .queueSidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .chatPanel,
+  .conversationList,
+  .contextWorkspace {
+    grid-column: 1;
+    min-height: auto;
+  }
+
+  .ownershipBar {
+    grid-template-columns: 1fr;
+  }
+
+  .contextTabs {
+    overflow-x: auto;
+    grid-template-columns: repeat(5, minmax(78px, 1fr));
   }
 }

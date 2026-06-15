@@ -2,18 +2,27 @@
 const appShell = document.querySelector(".appShell");
 const currentUserId = Number(appShell?.dataset.currentUserId || 0);
 const closureTypes = ["Report", "Invoice", "Lead", "Complaint", "Home Collection", "Doctor", "Pickup", "Other"];
+const LOOKUP_CACHE_TTL_MS = 10 * 60 * 1000;
+const AUDIT_CACHE_TTL_MS = 30 * 1000;
+const MESSAGE_PAGE_SIZE = 100;
 
 const state = {
   activeMobile: "",
   activeQueue: "All Chats",
   allRows: [],
   rows: [],
+  messageRows: [],
+  oldestMessageId: null,
+  hasOlderMessages: false,
+  loadingOlderMessages: false,
   userOptions: [],
   searchTimer: null,
   showQueues: true,
   showChatList: true,
   drawerMode: "",
   selectedFile: null,
+  lookupCache: new Map(),
+  auditCache: new Map(),
 };
 
 const els = {
@@ -61,7 +70,10 @@ const els = {
   drawerClose: document.querySelector("#drawerClose"),
   drawerCancel: document.querySelector("#drawerCancel"),
   drawerSave: document.querySelector("#drawerSave"),
+  newConversationBtn: document.querySelector("#newConversationBtn"),
   actionButtons: document.querySelectorAll("[data-drawer]"),
+  contextTabs: document.querySelectorAll("[data-context-tab]"),
+  contextPanels: document.querySelectorAll("[data-context-panel]"),
 };
 
 const replyDictionary = [
@@ -100,6 +112,7 @@ const attachmentTypes = [
 const drawerForms = {
   Link: [],
   Create: [],
+  "New Conversation": ["Mobile Number", "Message"],
   "Add Note": ["Internal Note"],
   "Add Tag": ["Tag Name"],
   Reassign: ["New Owner", "Reason"],
@@ -211,7 +224,31 @@ function mediaUrl(value) {
   return text.startsWith("http://") || text.startsWith("https://") || text.startsWith("/uploads/") ? text : "";
 }
 
+function mediaExtension(value) {
+  return String(value || "").split("?", 1)[0].split("#", 1)[0].toLowerCase();
+}
+
+function isAudioUrl(value) {
+  const text = mediaExtension(value);
+  return [".ogg", ".oga", ".opus", ".mp3", ".m4a", ".aac", ".wav", ".webm"].some((ext) => text.endsWith(ext));
+}
+
+function isVideoUrl(value) {
+  const text = mediaExtension(value);
+  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => text.endsWith(ext));
+}
+
 function mediaInfo(row) {
+  const streamUrl = mediaUrl(row.vedio);
+  if (streamUrl || row.vedio) {
+    const kind = isVideoUrl(streamUrl || row.vedio) ? "video" : "audio";
+    return {
+      kind,
+      label: row.msg || (kind === "video" ? "Video attachment" : "Voice note"),
+      url: streamUrl,
+      id: row.vedio || "",
+    };
+  }
   const imageUrl = mediaUrl(row.imgid) || mediaUrl(row.img);
   if (imageUrl || row.img) {
     return {
@@ -242,14 +279,29 @@ function renderMedia(row) {
   if (media.kind === "image" && media.url) {
     return `
       <a class="imageBubble" href="${url}" target="_blank" rel="noreferrer" aria-label="${label}">
-        <img src="${url}" alt="${label}" loading="lazy" />
+        <img src="${url}" alt="${label}" loading="lazy" decoding="async" />
       </a>
+    `;
+  }
+  if (media.kind === "audio" && media.url) {
+    return `
+      <div class="audioBubble">
+        <strong>${label}</strong>
+        <audio controls preload="metadata" src="${url}"></audio>
+      </div>
+    `;
+  }
+  if (media.kind === "video" && media.url) {
+    return `
+      <div class="videoBubble">
+        <video controls preload="metadata" src="${url}"></video>
+      </div>
     `;
   }
   const href = media.url ? ` href="${url}" target="_blank" rel="noreferrer"` : "";
   return `
     <a class="fileBubble"${href}>
-      <div><strong>${label}</strong><span>${media.kind === "document" ? "PDF / document" : "Image"}${media.url ? " - open" : " - media id"}</span>${idText}</div>
+      <div><strong>${label}</strong><span>${media.kind === "document" ? "PDF / document" : media.kind === "audio" ? "Audio" : media.kind === "video" ? "Video" : "Image"}${media.url ? " - open" : " - media id"}</span>${idText}</div>
     </a>
   `;
 }
@@ -283,12 +335,48 @@ function conversationType(row) {
   return "Report";
 }
 
+function validDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function hasPendingLoginUserReply(row) {
+  if (!row || isClosed(row)) return false;
+  if (row.sla_pending !== undefined && row.sla_pending !== null) return Boolean(row.sla_pending);
+  const isIncoming = String(row.color || "").trim().toLowerCase() === "red";
+  const incomingAt = validDate(row.last_incoming_at) || (isIncoming ? validDate(row.datetimess) : null);
+  if (!incomingAt) return false;
+  const userReplyAt = validDate(row.last_user_reply_at);
+  return !userReplyAt || incomingAt.getTime() > userReplyAt.getTime();
+}
+
+function isWaitingForPatient(row) {
+  if (!row || isClosed(row)) return false;
+  return !hasPendingLoginUserReply(row) && String(row.color || "").trim().toLowerCase() === "green";
+}
+
 function sla(row) {
-  if (row.color === "green") return { value: 0, label: "0m", tone: "green" };
-  const date = new Date(row.datetimess || Date.now());
-  const value = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
+  if (!hasPendingLoginUserReply(row)) return { value: 0, label: "0m", tone: "green" };
+  const serverMinutes = Number(row.sla_minutes);
+  const date = validDate(row.last_incoming_at) || validDate(row.datetimess) || new Date();
+  const value = Number.isFinite(serverMinutes) ? serverMinutes : Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
   const tone = value < 5 ? "green" : value <= 15 ? "amber" : value <= 30 ? "red" : "breach";
   return { value, label: `${value}m`, tone };
+}
+
+function slaBadge(row) {
+  const currentSla = sla(row);
+  if (!hasPendingLoginUserReply(row)) {
+    return `<span class="sla replied">Replied</span>`;
+  }
+  return `<span class="sla ${currentSla.tone}">${escapeHtml(currentSla.label)}</span>`;
+}
+
+function lockIcon(locked) {
+  return locked
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 7.4-2.1"></path></svg>';
 }
 
 function ownerFor(row) {
@@ -349,10 +437,69 @@ function renderMiniList(element, rows, mapRow, emptyText) {
   }).join("");
 }
 
+function actionLabel(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function auditDescription(action) {
+  const actor = action.performed_by_name || "System";
+  const oldOwner = action.old_owner_name || action.old_value || "Unassigned";
+  const newOwner = action.new_owner_name || action.new_value || "";
+  if (action.action_type === "reassign") {
+    return `${actor} reassigned from ${oldOwner} to ${newOwner || "Unassigned"}`;
+  }
+  if (action.action_type === "take_ownership") {
+    return `${actor} took ownership`;
+  }
+  if (action.action_type === "update_type") {
+    return `${actor} changed type from ${action.old_value || "-"} to ${action.new_value || "-"}`;
+  }
+  if (action.action_type === "close_conversation") {
+    return `${actor} closed conversation`;
+  }
+  if (action.action_type === "add_note") {
+    return `${actor} added note`;
+  }
+  if (action.action_type === "send_message") {
+    return `${actor} sent message`;
+  }
+  return `${actor} performed ${actionLabel(action.action_type)}`;
+}
+
+function auditDetail(action) {
+  const details = [];
+  if (action.reason) details.push(`Reason: ${action.reason}`);
+  if (action.new_value && !["reassign", "update_type"].includes(action.action_type)) details.push(`Value: ${action.new_value}`);
+  return details.join(" | ");
+}
+
+function renderAuditActions(actions) {
+  if (!els.auditSummary) return;
+  const visible = (actions || []).slice(0, 8);
+  if (!visible.length) {
+    els.auditSummary.innerHTML = '<span class="emptyLink">No audit actions recorded yet.</span>';
+    return;
+  }
+  els.auditSummary.innerHTML = `
+    <div class="auditList">
+      ${visible.map((action) => `
+        <article class="auditItem">
+          <strong>${escapeHtml(auditDescription(action))}</strong>
+          <span>${escapeHtml(auditDetail(action) || actionLabel(action.action_type))}</span>
+          <time>${escapeHtml(formatShortDate(action.created_at))}</time>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
 function setContextLoading() {
   if (els.leadList) els.leadList.innerHTML = '<p class="emptyLink">Loading leads...</p>';
   if (els.ticketList) els.ticketList.innerHTML = '<p class="emptyLink">Loading tickets...</p>';
   if (els.homeCollectionList) els.homeCollectionList.innerHTML = '<p class="emptyLink">Loading bookings...</p>';
+  if (els.auditSummary) els.auditSummary.textContent = "Loading audit...";
 }
 
 function renderUnifiedLookup(data, row) {
@@ -364,9 +511,12 @@ function renderUnifiedLookup(data, row) {
     ? `${linkedPatients.length} linked patient${linkedPatients.length > 1 ? "s" : ""}`
     : fallbackName || "No linked contact";
   els.contactContext.innerHTML = linkedPatients.length
-    ? linkedPatients.slice(0, 4).map((patient) => `
-      <div>
-        <dt>${escapeHtml(patient.full_name || "-")}</dt>
+    ? linkedPatients.slice(0, 6).map((patient, index) => `
+      <div class="linkedPatientRow">
+        <dt>
+          <span>${index + 1}</span>
+          ${escapeHtml(patient.full_name || "-")}
+        </dt>
         <dd>${escapeHtml(patient.contact_mobile || patient.alternate_mobile || "-")}</dd>
       </div>
     `).join("")
@@ -398,6 +548,59 @@ function renderUnifiedLookup(data, row) {
   );
 }
 
+function cacheEntry(cache, mobile, ttlMs) {
+  const entry = cache.get(mobile);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > ttlMs) {
+    cache.delete(mobile);
+    return null;
+  }
+  return entry.data;
+}
+
+async function lookupContext(mobile) {
+  const cached = cacheEntry(state.lookupCache, mobile, LOOKUP_CACHE_TTL_MS);
+  if (cached) return cached;
+  const data = await fetchJson(`/api/mobile-lookup?mobile=${encodeURIComponent(mobile)}`);
+  state.lookupCache.set(mobile, { cachedAt: Date.now(), data });
+  return data;
+}
+
+async function lookupAuditActions(mobile) {
+  const cached = cacheEntry(state.auditCache, mobile, AUDIT_CACHE_TTL_MS);
+  if (cached) return cached;
+  const data = await fetchJson(`/api/conversations/${encodeURIComponent(mobile)}/actions`);
+  state.auditCache.set(mobile, { cachedAt: Date.now(), data });
+  return data;
+}
+
+function messageKey(row) {
+  if (row.id) return `message-${row.id}`;
+  return `note-${row.datetimess || row.time || ""}-${row.note || ""}`;
+}
+
+function mergeMessageRows(olderRows, newerRows) {
+  const seen = new Set();
+  return [...olderRows, ...newerRows].filter((row) => {
+    const key = messageKey(row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function fetchMessagesPage(mobile, beforeId = null) {
+  const params = new URLSearchParams({ limit: String(MESSAGE_PAGE_SIZE) });
+  if (beforeId) params.set("before_id", String(beforeId));
+  return fetchJson(`/api/conversations/${encodeURIComponent(mobile)}/messages?${params.toString()}`);
+}
+
+function invalidateConversationCache(mobile, options = {}) {
+  if (!mobile) return;
+  if (options.lookup) state.lookupCache.delete(mobile);
+  if (options.audit !== false) state.auditCache.delete(mobile);
+}
+
 function visibleRows() {
   const q = els.searchInput.value.trim().toLowerCase();
   return state.allRows.filter((row) => {
@@ -408,7 +611,7 @@ function visibleRows() {
       (state.activeQueue === "Unassigned" && !owner) ||
       (state.activeQueue === "My Chats" && owner === currentUser) ||
       (state.activeQueue === "Team Chats" && owner && owner !== currentUser) ||
-      (state.activeQueue === "Waiting For Patient" && row.color === "red") ||
+      (state.activeQueue === "Waiting For Patient" && isWaitingForPatient(row)) ||
       (state.activeQueue === "SLA Breached" && currentSla.value > 30) ||
       (state.activeQueue === "Archived" && false);
     const text = `${row.mobile} ${row.msg || ""} ${row.empname || ""} ${row.patient_name || ""} ${row.patient_code || ""} ${row.id}`.toLowerCase();
@@ -425,7 +628,7 @@ function updateQueueCounts() {
       const owner = ownerFor(row);
       return owner && owner !== currentUser;
     }).length,
-    "Waiting For Patient": state.allRows.filter((row) => row.color === "red").length,
+    "Waiting For Patient": state.allRows.filter((row) => isWaitingForPatient(row)).length,
     "SLA Breached": state.allRows.filter((row) => sla(row).value > 30).length,
     Archived: 0,
   };
@@ -454,7 +657,7 @@ function renderConversations() {
         </div>
         <p>${escapeHtml(conversationPreview(row))}</p>
         <div class="rowMeta">
-          <span class="sla ${currentSla.tone}">${escapeHtml(currentSla.label)}</span>
+          ${slaBadge(row)}
           <span>${escapeHtml(owner || "Unassigned")}</span>
           ${isClosed(row) ? '<span class="status closed">Closed</span>' : ""}
           ${row.color === "red" ? "<b>1</b>" : ""}
@@ -467,7 +670,7 @@ function renderConversations() {
   }).join("");
 }
 
-function renderMessages(rows) {
+function renderMessages(rows, options = {}) {
   if (!state.activeMobile) {
     els.messages.innerHTML = '<p class="emptyLink">Select a patient conversation to view messages.</p>';
     return;
@@ -477,7 +680,10 @@ function renderMessages(rows) {
     return;
   }
   let activeDate = "";
-  els.messages.innerHTML = rows.map((row) => {
+  const olderControl = state.hasOlderMessages
+    ? `<button class="loadOlderBtn" type="button" id="loadOlderMessages">${state.loadingOlderMessages ? "Loading..." : "Load older messages"}</button>`
+    : "";
+  els.messages.innerHTML = `${olderControl}${rows.map((row) => {
     const nextDate = dateKey(rowDate(row));
     const divider = nextDate === activeDate ? "" : `<span class="dateDivider">${escapeHtml(dateDividerLabel(row))}</span>`;
     activeDate = nextDate;
@@ -500,8 +706,10 @@ function renderMessages(rows) {
         <span class="messageMeta">${escapeHtml(displayTime(row))} ${deliveryTick(row)}</span>
       </div>
     `;
-  }).join("");
-  els.messages.scrollTop = els.messages.scrollHeight;
+  }).join("")}`;
+  if (options.scrollToBottom !== false) {
+    els.messages.scrollTop = els.messages.scrollHeight;
+  }
 }
 
 function updateSelected(row) {
@@ -513,11 +721,10 @@ function updateSelected(row) {
   const type = conversationType(row);
   const currentSla = sla(row);
   els.activeMobile.textContent = displayContactName(row);
-  els.activeSummary.textContent = `${row.mobile} Â· WhatsApp Official API`;
+  els.activeSummary.textContent = row.mobile;
   els.ownerLine.innerHTML = `
-    <span class="status ${owned ? "owned" : "unassigned"}">${owned ? "Owned" : "Unassigned"}</span>
-    ${closed ? '<span class="status closed">Closed</span>' : ""}
     <span>Owner: ${escapeHtml(owner || "None")}</span>
+    ${closed ? '<span class="status closed">Closed</span>' : ""}
     <span>Last reply: ${row.color === "green" ? escapeHtml(displayTime(row)) : "-"}</span>
   `;
   els.slaStatus.innerHTML = `<span class="sla ${currentSla.tone}">${escapeHtml(currentSla.label)}</span>`;
@@ -532,9 +739,8 @@ function updateSelected(row) {
     button.title = ownedByCurrentUser ? "" : owned ? `Assigned to ${owner}` : "Take ownership first";
   });
   els.takeBtn.disabled = owned || closed;
-  els.takeBtn.textContent = owned
-    ? ownedByCurrentUser ? "Ownership Locked" : `Assigned to ${owner}`
-    : "Take Ownership";
+  els.takeBtn.innerHTML = `${lockIcon(owned)}<span>${owned ? "Locked" : "Ownership"}</span>`;
+  els.takeBtn.setAttribute("aria-label", owned ? "Ownership locked" : "Get ownership");
   els.closeBtn.disabled = !ownedByCurrentUser || closed;
   els.closeBtn.textContent = closed ? "Closed" : "Close Conversation";
   setComposerEnabled(
@@ -573,15 +779,45 @@ async function loadConversations() {
 
 async function loadMessages(mobile) {
   state.activeMobile = mobile;
+  state.messageRows = [];
+  state.oldestMessageId = null;
+  state.hasOlderMessages = false;
+  state.loadingOlderMessages = false;
   const selected = state.allRows.find((row) => row.mobile === mobile);
   updateSelected(selected);
   renderConversations();
   const [messagesData, lookupData] = await Promise.all([
-    fetchJson(`/api/conversations/${encodeURIComponent(mobile)}/messages`),
-    fetchJson(`/api/mobile-lookup?mobile=${encodeURIComponent(mobile)}`),
+    fetchMessagesPage(mobile),
+    lookupContext(mobile),
   ]);
-  renderMessages(messagesData.rows || []);
+  state.messageRows = messagesData.rows || [];
+  state.oldestMessageId = messagesData.oldest_id || null;
+  state.hasOlderMessages = Boolean(messagesData.has_more);
+  renderMessages(state.messageRows);
   renderUnifiedLookup(lookupData, selected || { mobile });
+  const actionsData = await lookupAuditActions(mobile);
+  renderAuditActions(actionsData.actions || []);
+}
+
+async function loadOlderMessages() {
+  if (!state.activeMobile || !state.oldestMessageId || !state.hasOlderMessages || state.loadingOlderMessages) return;
+  state.loadingOlderMessages = true;
+  const previousHeight = els.messages.scrollHeight;
+  renderMessages(state.messageRows, { scrollToBottom: false });
+  try {
+    const data = await fetchMessagesPage(state.activeMobile, state.oldestMessageId);
+    const olderRows = data.rows || [];
+    state.messageRows = mergeMessageRows(olderRows, state.messageRows);
+    state.oldestMessageId = data.oldest_id || state.oldestMessageId;
+    state.hasOlderMessages = Boolean(data.has_more);
+    state.loadingOlderMessages = false;
+    renderMessages(state.messageRows, { scrollToBottom: false });
+    els.messages.scrollTop = els.messages.scrollHeight - previousHeight;
+  } catch (error) {
+    showToast(error.message);
+    state.loadingOlderMessages = false;
+    renderMessages(state.messageRows, { scrollToBottom: false });
+  }
 }
 
 function setLayoutClasses() {
@@ -652,7 +888,7 @@ function drawerFieldsHtml(fields) {
       ${escapeHtml(field)}
       ${field === "New Owner"
         ? '<input class="ownerSearch" list="ownerOptions" data-field="New Owner" autocomplete="off" placeholder="Search owner name" /><datalist id="ownerOptions"></datalist><input type="hidden" data-field="New Owner ID" />'
-        : field.includes("Information") || field.includes("Note")
+        : field.includes("Information") || field.includes("Note") || field === "Message"
           ? `<textarea data-field="${escapeHtml(field)}"></textarea>`
           : `<input data-field="${escapeHtml(field)}" />`}
     </label>
@@ -661,6 +897,26 @@ function drawerFieldsHtml(fields) {
 
 function fieldValue(label) {
   return els.drawerFields.querySelector(`[data-field="${CSS.escape(label)}"]`)?.value?.trim() || "";
+}
+
+function cleanConversationMobile(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length > 10 && digits.startsWith("91")) return digits.slice(-10);
+  if (digits.length > 10 && digits.startsWith("0")) return digits.slice(-10);
+  return digits;
+}
+
+function drawerPayload() {
+  const payload = {};
+  els.drawerFields.querySelectorAll("[data-field]").forEach((field) => {
+    if (field.type === "hidden") return;
+    payload[field.dataset.field] = field.value?.trim?.() || "";
+  });
+  const activeCreate = els.drawerQuestion.querySelector("[data-create-type].active");
+  const activeLink = els.drawerQuestion.querySelector("[data-link-type].active");
+  if (activeCreate) payload.create_type = activeCreate.dataset.createType;
+  if (activeLink) payload.link_type = activeLink.dataset.linkType;
+  return payload;
 }
 
 async function loadUsers(query = "") {
@@ -690,7 +946,7 @@ function canCurrentUserAct(row) {
 
 function openDrawer(title) {
   const selected = state.allRows.find((row) => row.mobile === state.activeMobile);
-  if (!canCurrentUserAct(selected)) {
+  if (title !== "New Conversation" && !canCurrentUserAct(selected)) {
     showToast(ownerFor(selected) ? `Assigned to ${ownerFor(selected)}` : "Take ownership first");
     return;
   }
@@ -716,6 +972,14 @@ function openDrawer(title) {
     `;
     fields = linkForms.Patient;
   }
+  if (title === "New Conversation") {
+    question = `
+      <section class="closureQuestion">
+        <h3>Start WhatsApp conversation</h3>
+        <p>Ownership will be locked to you before sending the first message.</p>
+      </section>
+    `;
+  }
   if (title === "Close Conversation") {
     question = `
       <section class="closureQuestion">
@@ -730,7 +994,7 @@ function openDrawer(title) {
   }
   els.drawerQuestion.innerHTML = question;
   els.drawerFields.innerHTML = drawerFieldsHtml(fields);
-  els.drawerSave.textContent = title === "Close Conversation" ? "Close Conversation" : "Save";
+  els.drawerSave.textContent = title === "Close Conversation" ? "Close Conversation" : title === "New Conversation" ? "Start Conversation" : "Save";
   els.drawerBackdrop.classList.remove("hidden");
   if (title === "Reassign") loadUsers().catch((error) => showToast(error.message));
 }
@@ -748,6 +1012,11 @@ els.conversationList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-mobile]");
   if (!button) return;
   loadMessages(button.dataset.mobile).catch((error) => showToast(error.message));
+});
+
+els.messages.addEventListener("click", (event) => {
+  if (!event.target.closest("#loadOlderMessages")) return;
+  loadOlderMessages();
 });
 
 els.searchInput.addEventListener("input", () => {
@@ -776,6 +1045,7 @@ els.takeBtn.addEventListener("click", async () => {
       body: JSON.stringify({}),
     });
     const selected = applyWorkflowState(data.state);
+    invalidateConversationCache(state.activeMobile);
     updateSelected(selected);
     renderConversations();
     showToast(`Ownership locked to ${currentUser}`);
@@ -809,6 +1079,7 @@ els.saveTypeBtn.addEventListener("click", async () => {
       body: JSON.stringify({ conversation_type: els.typeSelect.value }),
     });
     const selected = applyWorkflowState(data.state);
+    invalidateConversationCache(state.activeMobile);
     updateSelected(selected);
     renderConversations();
     showToast(`Conversation type saved as ${els.typeSelect.value}`);
@@ -836,6 +1107,7 @@ els.replyForm.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ msg, empname: currentUser, media }),
     });
+    invalidateConversationCache(state.activeMobile);
     els.replyText.value = "";
     state.selectedFile = null;
     if (els.fileInput) els.fileInput.value = "";
@@ -885,6 +1157,16 @@ document.querySelectorAll("[data-drawer]").forEach((button) => {
   button.addEventListener("click", () => openDrawer(button.dataset.drawer));
 });
 
+els.newConversationBtn?.addEventListener("click", () => openDrawer("New Conversation"));
+
+els.contextTabs.forEach((button) => {
+  button.addEventListener("click", () => {
+    const tab = button.dataset.contextTab;
+    els.contextTabs.forEach((item) => item.classList.toggle("active", item === button));
+    els.contextPanels.forEach((panel) => panel.classList.toggle("active", panel.dataset.contextPanel === tab));
+  });
+});
+
 els.drawerQuestion.addEventListener("click", (event) => {
   const createButton = event.target.closest("[data-create-type]");
   const linkButton = event.target.closest("[data-link-type]");
@@ -910,8 +1192,36 @@ els.drawerFields.addEventListener("input", (event) => {
 });
 
 els.drawerSave.addEventListener("click", async () => {
-  if (!state.activeMobile) return;
   try {
+  if (state.drawerMode === "New Conversation") {
+    const mobile = cleanConversationMobile(fieldValue("Mobile Number"));
+    const message = fieldValue("Message");
+    if (mobile.length < 10) {
+      showToast("Enter a valid mobile number");
+      return;
+    }
+    if (!message) {
+      showToast("Enter message text");
+      return;
+    }
+    els.drawerSave.disabled = true;
+    await fetchJson(`/api/conversations/${encodeURIComponent(mobile)}/ownership`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    await fetchJson(`/api/conversations/${encodeURIComponent(mobile)}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ msg: message, empname: currentUser }),
+    });
+    invalidateConversationCache(mobile);
+    state.activeMobile = mobile;
+    await loadConversations();
+    await loadMessages(mobile);
+    showToast("New conversation started");
+  } else {
+  if (!state.activeMobile) return;
   if (state.drawerMode === "Close Conversation") {
     const closureType = document.querySelector("#closureType")?.value || els.typeSelect.value;
     if (!closureType) {
@@ -924,6 +1234,7 @@ els.drawerSave.addEventListener("click", async () => {
       body: JSON.stringify({ conversation_type: closureType, note: fieldValue("Closure Note") }),
     });
     const selected = applyWorkflowState(data.state);
+    invalidateConversationCache(state.activeMobile);
     updateSelected(selected);
     renderConversations();
     showToast(`Conversation closed as ${closureType}`);
@@ -938,6 +1249,7 @@ els.drawerSave.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note }),
     });
+    invalidateConversationCache(state.activeMobile);
     await loadMessages(state.activeMobile);
     showToast("Note saved to conversation");
   } else if (state.drawerMode === "Reassign") {
@@ -952,15 +1264,32 @@ els.drawerSave.addEventListener("click", async () => {
       body: JSON.stringify({ owner_user_id: ownerUserId, reason: fieldValue("Reason") }),
     });
     const selected = applyWorkflowState(data.state);
+    invalidateConversationCache(state.activeMobile);
     updateSelected(selected);
     renderConversations();
+    await loadMessages(state.activeMobile);
     showToast(`Conversation reassigned to ${ownerFor(selected)}`);
   } else {
-    showToast(`${state.drawerMode} saved to conversation context`);
+    await fetchJson(`/api/conversations/${encodeURIComponent(state.activeMobile)}/actions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action_type: state.drawerMode.toLowerCase().replaceAll(" ", "_"),
+        payload: drawerPayload(),
+      }),
+    });
+    invalidateConversationCache(state.activeMobile, {
+      lookup: ["Link", "Create"].includes(state.drawerMode),
+    });
+    await loadMessages(state.activeMobile);
+    showToast(`${state.drawerMode} saved to audit trail`);
+  }
   }
   els.drawerBackdrop.classList.add("hidden");
   } catch (error) {
     showToast(error.message);
+  } finally {
+    els.drawerSave.disabled = false;
   }
 });
 
@@ -968,5 +1297,11 @@ if (els.dateInput) els.dateInput.valueAsDate = new Date();
 setComposerEnabled(false, "Take ownership to reply...");
 setLayoutClasses();
 loadConversations().catch((error) => showToast(error.message));
+setInterval(() => {
+  if (!state.allRows.length) return;
+  renderConversations();
+  const selected = state.allRows.find((row) => row.mobile === state.activeMobile);
+  if (selected) updateSelected(selected);
+}, 60000);
 
 

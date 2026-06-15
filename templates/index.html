@@ -17,7 +17,7 @@
           <input id="dateInput" class="dateControl" type="date" />
           <button class="layoutToggle active" id="toggleQueues" type="button">Hide Queues</button>
           <button class="layoutToggle active" id="toggleChatList" type="button">Hide Chat List</button>
-          <button class="outlineBtn" type="button">+ New Conversation</button>
+          <button class="outlineBtn" id="newConversationBtn" type="button">+ New Conversation</button>
           <form class="logoutForm" method="post" action="{{ url_for('logout') }}">
             <button class="layoutToggle" type="submit">Logout</button>
           </form>
@@ -33,13 +33,13 @@
             <input id="searchInput" placeholder="Search chat, patient, mobile" />
           </div>
           <nav id="queueNav">
-            <button class="active" type="button" data-queue="All Chats"><span>All Chats</span><strong>0</strong></button>
-            <button type="button" data-queue="Unassigned"><span>Unassigned</span><strong>0</strong></button>
-            <button type="button" data-queue="My Chats"><span>My Chats</span><strong>0</strong></button>
-            <button type="button" data-queue="Team Chats"><span>Team Chats</span><strong>0</strong></button>
-            <button type="button" data-queue="Waiting For Patient"><span>Waiting For Patient</span><strong>0</strong></button>
-            <button type="button" data-queue="SLA Breached"><span>SLA Breached</span><strong>0</strong></button>
-            <button type="button" data-queue="Archived"><span>Archived</span><strong>0</strong></button>
+            <button class="active" type="button" data-queue="All Chats" title="All Chats"><svg viewBox="0 0 24 24"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path></svg><span>All</span><strong>0</strong></button>
+            <button type="button" data-queue="Unassigned" title="Unassigned"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 22c1.4-4 4-6 8-6s6.6 2 8 6"></path><path d="M19 5v6"></path><path d="M16 8h6"></path></svg><span>Unassigned</span><strong>0</strong></button>
+            <button type="button" data-queue="My Chats" title="My Chats"><svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path><path d="m9 11 2 2 4-4"></path></svg><span>Mine</span><strong>0</strong></button>
+            <button type="button" data-queue="Team Chats" title="Team Chats"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 21c1-4 3-6 6-6s5 2 6 6"></path><path d="M14 16c2.8.2 4.8 1.8 6 5"></path></svg><span>Team</span><strong>0</strong></button>
+            <button type="button" data-queue="Waiting For Patient" title="Waiting For Patient"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span>Waiting</span><strong>0</strong></button>
+            <button type="button" data-queue="SLA Breached" title="SLA Breached"><svg viewBox="0 0 24 24"><path d="M12 3 2 21h20z"></path><path d="M12 9v5"></path><path d="M12 17h.01"></path></svg><span>SLA</span><strong>0</strong></button>
+            <button type="button" data-queue="Archived" title="Archived"><svg viewBox="0 0 24 24"><path d="M4 7h16"></path><path d="M5 7l1 14h12l1-14"></path><path d="M9 11h6"></path><path d="M8 3h8l1 4H7z"></path></svg><span>Archive</span><strong>0</strong></button>
           </nav>
           <div class="slaLegend">
             <h3>Phase 1 SLA</h3>
@@ -161,8 +161,15 @@
             </div>
             <div class="prominentTagList" id="tagStrip"></div>
           </section>
+          <nav class="contextTabs" aria-label="Context sections">
+            <button class="active" type="button" data-context-tab="contact">Contact</button>
+            <button type="button" data-context-tab="hc">HC</button>
+            <button type="button" data-context-tab="leads">Leads</button>
+            <button type="button" data-context-tab="tickets">Tickets</button>
+            <button type="button" data-context-tab="audit">Audit</button>
+          </nav>
           <div class="contextScroll">
-            <section class="contextBlock">
+            <section class="contextBlock contextPanel active" data-context-panel="contact">
               <h3>Linked Contact</h3>
               <article class="entityCard">
                 <strong id="contactName">No conversation selected</strong>
@@ -173,25 +180,25 @@
                 </dl>
               </article>
             </section>
-            <section class="contextBlock">
+            <section class="contextBlock contextPanel" data-context-panel="tickets">
               <h3>Open Tickets</h3>
               <div class="miniRecords" id="ticketList">
                 <p class="emptyLink">Select a conversation.</p>
               </div>
             </section>
-            <section class="contextBlock">
+            <section class="contextBlock contextPanel" data-context-panel="hc">
               <h3>Home Collections</h3>
               <div class="miniRecords" id="homeCollectionList">
                 <p class="emptyLink">Select a conversation.</p>
               </div>
             </section>
-            <section class="contextBlock">
+            <section class="contextBlock contextPanel" data-context-panel="leads">
               <h3>Leads</h3>
               <div class="miniRecords" id="leadList">
                 <p class="emptyLink">Select a conversation.</p>
               </div>
             </section>
-            <section class="contextBlock">
+            <section class="contextBlock contextPanel" data-context-panel="audit">
               <h3>Audit Summary</h3>
               <p class="contextText" id="auditSummary">Open a conversation to see ownership, status, and delivery details.</p>
             </section>

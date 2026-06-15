@@ -409,6 +409,27 @@ def phone_variants(value):
     return {item for item in variants if item}
 
 
+def outbound_whatsapp_mobile(value):
+    digits = phone_digits(value)
+    if len(digits) == 10:
+        return f"91{digits}"
+    if len(digits) == 11 and digits.startswith("0"):
+        return f"91{digits[-10:]}"
+    return digits or normalize_mobile(value)
+
+
+def apply_sla_fields(rows):
+    now = datetime.now()
+    for row in rows or []:
+        last_incoming = row.get("last_incoming_at")
+        last_user_reply = row.get("last_user_reply_at")
+        closed = row.get("workflow_status") == "closed"
+        pending = bool(last_incoming and not closed and (not last_user_reply or last_incoming > last_user_reply))
+        row["sla_pending"] = pending
+        row["sla_minutes"] = max(0, round((now - last_incoming).total_seconds() / 60)) if pending else 0
+    return rows
+
+
 def mobile_clean_sql(column_name):
     column = quote_identifier(column_name)
     return (
@@ -422,6 +443,20 @@ def dedupe_by_id(rows):
     for row in rows or []:
         row_id = row.get("id")
         key = row_id if row_id is not None else json.dumps(row, sort_keys=True, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(row)
+    return result
+
+
+def dedupe_patients(rows):
+    seen = set()
+    result = []
+    for row in rows or []:
+        mobile = next(iter(phone_variants(row.get("contact_mobile") or row.get("alternate_mobile") or "")), "")
+        name = " ".join(str(row.get("full_name") or "").lower().split())
+        key = (name, mobile)
         if key in seen:
             continue
         seen.add(key)
@@ -538,7 +573,7 @@ def fetch_linked_patients(cursor, caller_id):
         """,
         (caller_id,),
     )
-    return dedupe_by_id(cursor.fetchall())
+    return dedupe_patients(cursor.fetchall())
 
 
 def fetch_patient_addresses(cursor, patient_ids):
@@ -783,12 +818,52 @@ def ensure_current_owner(state_row, user):
     return ""
 
 
+def reopen_closed_conversation_for_incoming(cursor, mobile):
+    state_row = ensure_conversation_state(cursor, mobile)
+    if state_row.get("status") != "closed":
+        return False
+    cursor.execute(
+        """
+        UPDATE conversation_state
+        SET owner_user_id = NULL,
+            owner_name = NULL,
+            status = 'open'
+        WHERE mobile = %s
+        """,
+        (mobile,),
+    )
+    cursor.execute(
+        """
+        INSERT INTO conversation_actions
+          (mobile, action_type, performed_by_user_id, performed_by_name,
+           old_owner_user_id, old_owner_name, old_value, new_value, reason, payload_json)
+        VALUES (%s, 'reopen_on_incoming', NULL, 'System',
+                %s, %s, %s, 'open', 'New incoming message after closure', %s)
+        """,
+        (
+            mobile,
+            state_row.get("owner_user_id"),
+            state_row.get("owner_name"),
+            state_row.get("status"),
+            json.dumps({"closed_at": str(state_row.get("closed_at") or "")}, ensure_ascii=False),
+        ),
+    )
+    return True
+
+
 def download_netcore_media(media_id, kind, mime_type="", mobile=""):
     if not media_id or not CONFIG["netcore_token"]:
         return ""
-    extension = mimetypes.guess_extension(mime_type or "") or (".pdf" if kind == "document" else ".jpg")
+    fallback_extension = {
+        "document": ".pdf",
+        "audio": ".ogg",
+        "video": ".mp4",
+    }.get(kind, ".jpg")
+    extension = mimetypes.guess_extension(mime_type or "") or fallback_extension
     if extension == ".jpe":
         extension = ".jpg"
+    if extension == ".oga":
+        extension = ".ogg"
     folder = UPLOAD_DIR / "incoming"
     folder.mkdir(parents=True, exist_ok=True)
     mobile_prefix = normalize_mobile(mobile) or "unknown"
@@ -820,10 +895,15 @@ def normalize_incoming_payload(data):
     text_type = item.get("text_type") if isinstance(item.get("text_type"), dict) else {}
     image_type = item.get("image_type") if isinstance(item.get("image_type"), dict) else {}
     video_type = item.get("video_type") if isinstance(item.get("video_type"), dict) else {}
+    audio_type = item.get("audio_type") if isinstance(item.get("audio_type"), dict) else {}
     document_type = item.get("document_type") if isinstance(item.get("document_type"), dict) else {}
 
     image_id = str(image_type.get("id") or image_type.get("media_id") or "").strip()
     image_url = str(image_type.get("url") or image_type.get("link") or image_type.get("media_url") or item.get("image_url") or "").strip()
+    video_id = str(video_type.get("id") or video_type.get("media_id") or "").strip()
+    video_url = str(video_type.get("url") or video_type.get("link") or video_type.get("media_url") or item.get("video_url") or "").strip()
+    audio_id = str(audio_type.get("id") or audio_type.get("media_id") or "").strip()
+    audio_url = str(audio_type.get("url") or audio_type.get("link") or audio_type.get("media_url") or item.get("audio_url") or "").strip()
     document_id = str(document_type.get("id") or document_type.get("media_id") or "").strip()
     document_url = str(document_type.get("url") or document_type.get("link") or document_type.get("media_url") or item.get("document_url") or "").strip()
     document_name = str(document_type.get("filename") or document_type.get("name") or Path(document_url).name or "").strip()
@@ -838,12 +918,22 @@ def normalize_incoming_payload(data):
             document_url = download_netcore_media(document_id, "document", str(document_type.get("mime_type") or "application/pdf"), mobile)
         except Exception as exc:
             log_line("incoming-webhook.log", "incoming_document_download_failed", mediaId=document_id, error=str(exc))
+    if video_id and not video_url:
+        try:
+            video_url = download_netcore_media(video_id, "video", str(video_type.get("mime_type") or "video/mp4"), mobile)
+        except Exception as exc:
+            log_line("incoming-webhook.log", "incoming_video_download_failed", mediaId=video_id, error=str(exc))
+    if audio_id and not audio_url:
+        try:
+            audio_url = download_netcore_media(audio_id, "audio", str(audio_type.get("mime_type") or "audio/ogg"), mobile)
+        except Exception as exc:
+            log_line("incoming-webhook.log", "incoming_audio_download_failed", mediaId=audio_id, error=str(exc))
 
     return {
         "mobile": mobile,
-        "msg": str(text_type.get("text") or item.get("text") or item.get("msg") or image_type.get("caption") or document_type.get("caption") or ""),
+        "msg": str(text_type.get("text") or item.get("text") or item.get("msg") or image_type.get("caption") or video_type.get("caption") or document_type.get("caption") or audio_type.get("caption") or ""),
         "img": image_url or str(image_type.get("sha256") or ""),
-        "vedio": str(video_type.get("sha256") or ""),
+        "vedio": audio_url or audio_id or video_url or video_id or str(video_type.get("sha256") or audio_type.get("sha256") or ""),
         "pdff": document_name or (Path(document_url).name if document_url else ""),
         "docid": document_url or document_id,
         "imgid": image_url or image_id,
@@ -910,11 +1000,13 @@ def netcore_message_payload(mobile, msg, media):
 
 def send_via_provider(mobile, msg, media=None):
     provider = CONFIG["whatsapp_provider"]
+    recipient_mobile = outbound_whatsapp_mobile(mobile)
     log_line(
         "outgoing-whatsapp.log",
         "send_attempt",
         provider=provider,
         mobile=mask_mobile(mobile),
+        recipient=mask_mobile(recipient_mobile),
         messageLength=len(msg),
         mediaKind=(media or {}).get("kind", ""),
     )
@@ -931,7 +1023,7 @@ def send_via_provider(mobile, msg, media=None):
         response = requests.post(
             url,
             headers={"Authorization": f"Bearer {CONFIG['netcore_token']}", "Content-Type": "application/json"},
-            json={"message": [netcore_message_payload(mobile, msg, media)]},
+            json={"message": [netcore_message_payload(recipient_mobile, msg, media)]},
             timeout=30,
         )
         text = response.text
@@ -948,7 +1040,7 @@ def send_via_provider(mobile, msg, media=None):
             raise ValueError("STEWINDIA_TOKEN is required")
         response = requests.get(
             CONFIG["stewindia_url"],
-            params={"token": CONFIG["stewindia_token"], "phone": mobile, "message": msg},
+            params={"token": CONFIG["stewindia_token"], "phone": recipient_mobile, "message": msg},
             timeout=30,
         )
         text = response.text
@@ -1080,6 +1172,7 @@ def conversations():
         SELECT w.id, w.mobile, w.msg, w.img, w.vedio, w.pdff, w.docid, w.imgid,
                w.wabadatetime, w.empname, w.datetimess, w.color, w.status,
                w.provider_message_id, w.delivery_status,
+               activity.last_incoming_at, activity.last_outgoing_at, activity.last_user_reply_at,
                cs.owner_user_id, cs.owner_name, cs.conversation_type,
                cs.status AS workflow_status, cs.closed_at, cs.closure_note,
                cs.updated_at AS workflow_updated_at
@@ -1090,14 +1183,24 @@ def conversations():
           {where_sql}
           GROUP BY mobile
         ) latest ON latest.max_id = w.id
+        LEFT JOIN (
+          SELECT mobile,
+                 MAX(CASE WHEN color = 'red' THEN datetimess END) AS last_incoming_at,
+                 MAX(CASE WHEN color = 'green' THEN datetimess END) AS last_outgoing_at,
+                 MAX(CASE WHEN color = 'green' AND empname = %s THEN datetimess END) AS last_user_reply_at
+          FROM {table}
+          WHERE msg != '' OR img != '' OR pdff != '' OR docid != '' OR imgid != ''
+          GROUP BY mobile
+        ) activity ON activity.mobile = w.mobile
         LEFT JOIN conversation_state cs ON cs.mobile = w.mobile
         ORDER BY w.datetimess DESC
         LIMIT 300
     """
     with db_connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(sql, params)
+            cursor.execute(sql, params + [user["display_name"]])
             rows = cursor.fetchall()
+    rows = apply_sla_fields(rows)
     rows = attach_patient_names(rows)
     return jsonify(ok=True, rows=rows)
 
@@ -1110,6 +1213,20 @@ def list_messages(mobile):
     normalized = normalize_mobile(mobile)
     if not normalized:
         return jsonify(ok=False, error="Mobile missing"), 400
+    try:
+        limit = max(20, min(int(request.args.get("limit", 100)), 200))
+    except ValueError:
+        limit = 100
+    try:
+        before_id = int(request.args.get("before_id", 0))
+    except ValueError:
+        before_id = 0
+    message_filters = ["mobile = %s"]
+    params = [normalized]
+    if before_id > 0:
+        message_filters.append("id < %s")
+        params.append(before_id)
+    params.append(limit + 1)
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -1118,24 +1235,32 @@ def list_messages(mobile):
                        datetimess, color, status, provider_message_id, delivery_status,
                        delivery_status_remark, delivery_received_at
                 FROM {quote_identifier(CONFIG['table'])}
-                WHERE mobile = %s
-                ORDER BY id ASC
-                LIMIT 1000
+                WHERE {' AND '.join(message_filters)}
+                ORDER BY id DESC
+                LIMIT %s
                 """,
-                (normalized,),
+                params,
             )
-            rows = cursor.fetchall()
-            cursor.execute(
-                """
-                SELECT note, created_by_name, created_at
-                FROM conversation_notes
-                WHERE mobile = %s
-                ORDER BY created_at ASC
-                LIMIT 300
-                """,
-                (normalized,),
-            )
-            notes = cursor.fetchall()
+            fetched_rows = cursor.fetchall()
+            has_more = len(fetched_rows) > limit
+            rows = list(reversed(fetched_rows[:limit]))
+            notes = []
+            if rows:
+                datetimes = [row.get("datetimess") for row in rows if row.get("datetimess")]
+                min_dt = min(datetimes) if datetimes else None
+                max_dt = max(datetimes) if datetimes else None
+                if min_dt and max_dt:
+                    cursor.execute(
+                        """
+                        SELECT note, created_by_name, created_at
+                        FROM conversation_notes
+                        WHERE mobile = %s AND created_at >= %s AND created_at <= %s
+                        ORDER BY created_at ASC
+                        LIMIT 100
+                        """,
+                        (normalized, min_dt, max_dt),
+                    )
+                    notes = cursor.fetchall()
     rows = attach_patient_names(rows)
     for note in notes:
         rows.append({
@@ -1144,7 +1269,9 @@ def list_messages(mobile):
             "empname": note["created_by_name"],
             "datetimess": note["created_at"],
         })
-    return jsonify(ok=True, mobile=normalized, rows=rows)
+    rows.sort(key=lambda row: row.get("datetimess") or datetime.min)
+    oldest_id = min((row["id"] for row in rows if row.get("id")), default=None)
+    return jsonify(ok=True, mobile=normalized, rows=rows, has_more=has_more, oldest_id=oldest_id, limit=limit)
 
 
 @app.get("/api/users")
@@ -1386,6 +1513,61 @@ def reassign_conversation(mobile):
     return jsonify(ok=True, state=state_row)
 
 
+@app.get("/api/conversations/<mobile>/actions")
+def list_conversation_actions(mobile):
+    user, error = require_user()
+    if error:
+        return error
+    normalized = normalize_mobile(mobile)
+    if not normalized:
+        return jsonify(ok=False, error="Mobile missing"), 400
+    with db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, action_type, performed_by_name, old_owner_name, new_owner_name,
+                       old_value, new_value, reason, payload_json, created_at
+                FROM conversation_actions
+                WHERE mobile = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT 50
+                """,
+                (normalized,),
+            )
+            rows = cursor.fetchall()
+    return jsonify(ok=True, actions=rows)
+
+
+@app.post("/api/conversations/<mobile>/actions")
+def record_conversation_action(mobile):
+    user, error = require_user()
+    if error:
+        return error
+    normalized = normalize_mobile(mobile)
+    data = request.get_json(silent=True) or {}
+    action_type = str(data.get("action_type") or "").strip()[:80]
+    reason = str(data.get("reason") or "").strip()
+    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+    if not normalized or not action_type:
+        return jsonify(ok=False, error="Action missing"), 400
+    with db_connection() as conn:
+        with conn.cursor() as cursor:
+            state_row = ensure_conversation_state(cursor, normalized)
+            owner_error = ensure_current_owner(state_row, user)
+            if owner_error:
+                return jsonify(ok=False, error=owner_error), 403
+            log_conversation_action(
+                cursor,
+                normalized,
+                action_type,
+                user,
+                old_state=state_row,
+                reason=reason,
+                payload=payload,
+            )
+    return jsonify(ok=True)
+
+
 @app.post("/api/conversations/<mobile>/messages")
 def create_message(mobile):
     user, error = require_user()
@@ -1430,6 +1612,15 @@ def create_message(mobile):
                     (normalized, msg, image_value, pdf_name, document_id, image_id, display_date(), empname, provider_message_id, delivery_status),
                 )
                 row_id = cursor.lastrowid
+                log_conversation_action(
+                    cursor,
+                    normalized,
+                    "send_message",
+                    user,
+                    old_state=state_row,
+                    new_value="attachment" if media["url"] else "text",
+                    payload={"message_row_id": row_id, "has_media": bool(media["url"])},
+                )
         log_line("outgoing-whatsapp.log", "message_saved", id=row_id, mobile=mask_mobile(normalized), provider=provider_result.get("provider"), providerMessageId=provider_message_id or "")
         return jsonify(ok=True, id=row_id, provider=provider_result), 201
     except Exception as exc:
@@ -1458,8 +1649,9 @@ def incoming_webhook():
                     "INSERT INTO incoming_webhook_logs (mobile, received_at, payload_json) VALUES (%s, %s, %s)",
                     (payload["mobile"], payload["received_at"], raw_body),
                 )
-        log_line("incoming-webhook.log", "incoming_message_saved", mobile=mask_mobile(payload["mobile"]), receivedAt=payload["received_at"])
-        return jsonify(ok=True, message="Incoming WhatsApp message saved", data=payload)
+                reopened = reopen_closed_conversation_for_incoming(cursor, payload["mobile"])
+        log_line("incoming-webhook.log", "incoming_message_saved", mobile=mask_mobile(payload["mobile"]), receivedAt=payload["received_at"], reopened=reopened)
+        return jsonify(ok=True, message="Incoming WhatsApp message saved", data={**payload, "reopened": reopened})
     except Exception as exc:
         log_line("incoming-webhook.log", "incoming_message_failed", error=str(exc), body=raw_body[:2000])
         return jsonify(ok=False, error=str(exc)), 500
