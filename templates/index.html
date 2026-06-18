@@ -77,24 +77,16 @@
               <h2 id="activeMobile">No conversation selected</h2>
               <p id="activeSummary">Select a patient conversation to open the thread.</p>
               <div class="ownerLine" id="ownerLine">
-                <span class="status unassigned">Unassigned</span>
                 <span>Owner: None</span>
-                <span>Last reply: -</span>
+                <span id="slaStatus">-</span>
+                <span id="takenAt">Not taken</span>
               </div>
             </div>
           </div>
 
           <div class="ownershipBar">
             <div>
-              <strong>SLA Status</strong>
-              <span id="slaStatus">-</span>
-            </div>
-            <div>
-              <strong>Taken At</strong>
-              <span id="takenAt">Not taken</span>
-            </div>
-            <div>
-              <strong>Conversation Type</strong>
+              <strong title="Conversation Type">Type</strong>
               <div class="typeControl">
                 <select class="typeSelect" id="typeSelect">
                   <option>Report</option>
@@ -106,11 +98,11 @@
                   <option>Pickup</option>
                   <option>Other</option>
                 </select>
-                <button class="saveTypeBtn saved" id="saveTypeBtn" type="button">Saved</button>
+                <button class="saveTypeBtn saved" id="saveTypeBtn" type="button" title="Conversation type saved">Saved</button>
               </div>
             </div>
             <button class="applyBtn" id="takeBtn" type="button">Take Ownership</button>
-            <button class="closeBtn" id="closeBtn" type="button">Close Conversation</button>
+            <button class="closeBtn" id="closeBtn" type="button" title="Close Conversation">Close</button>
           </div>
 
           <div class="thread" id="messages">
@@ -142,7 +134,7 @@
         <aside class="contextWorkspace">
           <header>
             <h2>Context Workspace</h2>
-            <span>Patient, ticket, lead, collection, and audit context</span>
+            <span>Patient, ticket, lead, collection, audit</span>
           </header>
           <section class="contextBlock quickBlock">
             <h3>Fast Actions</h3>

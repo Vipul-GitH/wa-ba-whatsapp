@@ -702,6 +702,12 @@ h1 {
   font-weight: 800;
 }
 
+.headerChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .composer button,
 .sideDrawer header button {
   display: inline-flex;
@@ -2391,5 +2397,135 @@ h1 {
   .contextTabs {
     overflow-x: auto;
     grid-template-columns: repeat(5, minmax(78px, 1fr));
+  }
+}
+
+/* Compact controls pass: preserve features, reduce chrome. */
+.titleActionsOnly {
+  padding: 6px 12px;
+}
+
+.pageActions {
+  gap: 6px;
+}
+
+.userBadge,
+.dateControl,
+.layoutToggle,
+.outlineBtn {
+  min-height: 30px;
+  border-radius: 6px;
+  padding-inline: 9px;
+  font-size: 12px;
+}
+
+.ownershipBar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(108px, auto) minmax(86px, auto);
+  gap: 5px;
+  padding: 6px 10px;
+}
+
+.ownershipBar div {
+  gap: 1px;
+}
+
+.ownershipBar strong {
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.ownershipBar span {
+  font-size: 11px;
+}
+
+.ownershipBar .typeControl {
+  grid-template-columns: minmax(104px, 1fr) 42px;
+  gap: 5px;
+}
+
+.typeSelect,
+.saveTypeBtn {
+  min-height: 28px;
+}
+
+.saveTypeBtn {
+  min-width: 38px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.applyBtn,
+.closeBtn {
+  min-height: 30px;
+  border-radius: 7px;
+  padding-inline: 9px;
+}
+
+.applyBtn svg {
+  margin-right: 4px;
+}
+
+.contextWorkspace > header {
+  padding: 8px 10px;
+}
+
+.contextWorkspace h2 {
+  font-size: 15px;
+}
+
+.contextWorkspace header span {
+  margin-top: 1px;
+  font-size: 11px;
+}
+
+.quickBlock,
+.patientTagsBlock {
+  margin: 6px 6px 0;
+  padding: 8px;
+}
+
+.quickBlock h3,
+.patientTagsBlock h3,
+.contextBlock h3 {
+  font-size: 12px;
+}
+
+.actionGrid {
+  gap: 5px;
+}
+
+.actionGrid button {
+  min-height: 30px;
+  gap: 5px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.contextTabs {
+  gap: 4px;
+  padding: 6px 6px 0;
+}
+
+.contextTabs button {
+  min-height: 28px;
+  font-size: 10px;
+}
+
+.contextScroll {
+  padding: 6px;
+}
+
+@media (max-width: 720px) {
+  .ownershipBar {
+    grid-template-columns: 1fr;
+  }
+
+  .pageActions {
+    justify-content: stretch;
+  }
+
+  .pageActions > * {
+    flex: 1 1 auto;
   }
 }

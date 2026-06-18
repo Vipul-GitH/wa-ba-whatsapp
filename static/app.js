@@ -402,7 +402,7 @@ function conversationPreview(row) {
 }
 
 function displayContactName(row) {
-  return row.patient_name || row.empname || row.mobile;
+  return row.patient_name || row.mobile;
 }
 
 function formatShortDate(value) {
@@ -452,6 +452,9 @@ function auditDescription(action) {
   }
   if (action.action_type === "take_ownership") {
     return `${actor} took ownership`;
+  }
+  if (action.action_type === "reopen_conversation") {
+    return `${actor} reopened conversation`;
   }
   if (action.action_type === "update_type") {
     return `${actor} changed type from ${action.old_value || "-"} to ${action.new_value || "-"}`;
@@ -724,14 +727,18 @@ function updateSelected(row) {
   els.activeSummary.textContent = row.mobile;
   els.ownerLine.innerHTML = `
     <span>Owner: ${escapeHtml(owner || "None")}</span>
+    <span id="slaStatus" class="headerChip"></span>
+    <span id="takenAt" class="headerChip"></span>
     ${closed ? '<span class="status closed">Closed</span>' : ""}
-    <span>Last reply: ${row.color === "green" ? escapeHtml(displayTime(row)) : "-"}</span>
   `;
-  els.slaStatus.innerHTML = `<span class="sla ${currentSla.tone}">${escapeHtml(currentSla.label)}</span>`;
-  els.takenAt.textContent = owned ? "Current session" : "Not taken";
+  els.slaStatus = document.querySelector("#slaStatus");
+  els.takenAt = document.querySelector("#takenAt");
+  els.slaStatus.innerHTML = `SLA <span class="sla ${currentSla.tone}">${escapeHtml(currentSla.label)}</span>`;
+  els.takenAt.textContent = owned ? "Taken" : "Not taken";
   els.typeSelect.value = type;
   els.saveTypeBtn.className = "saveTypeBtn saved";
-  els.saveTypeBtn.textContent = "Saved";
+  els.saveTypeBtn.textContent = "✓";
+  els.saveTypeBtn.title = "Conversation type saved";
   els.typeSelect.disabled = !ownedByCurrentUser;
   els.saveTypeBtn.disabled = !ownedByCurrentUser;
   els.actionButtons.forEach((button) => {
@@ -742,7 +749,7 @@ function updateSelected(row) {
   els.takeBtn.innerHTML = `${lockIcon(owned)}<span>${owned ? "Locked" : "Ownership"}</span>`;
   els.takeBtn.setAttribute("aria-label", owned ? "Ownership locked" : "Get ownership");
   els.closeBtn.disabled = !ownedByCurrentUser || closed;
-  els.closeBtn.textContent = closed ? "Closed" : "Close Conversation";
+  els.closeBtn.textContent = closed ? "Closed" : "Close";
   setComposerEnabled(
     ownedByCurrentUser && !closed,
     closed
@@ -901,8 +908,10 @@ function fieldValue(label) {
 
 function cleanConversationMobile(value) {
   const digits = String(value || "").replace(/\D/g, "");
-  if (digits.length > 10 && digits.startsWith("91")) return digits.slice(-10);
-  if (digits.length > 10 && digits.startsWith("0")) return digits.slice(-10);
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(-10)}`;
+  if (digits.length > 10 && digits.startsWith("91")) return `91${digits.slice(-10)}`;
+  if (digits.length > 10) return `91${digits.slice(-10)}`;
   return digits;
 }
 
@@ -1062,7 +1071,8 @@ els.typeSelect.addEventListener("change", () => {
   const selected = state.allRows.find((row) => row.mobile === state.activeMobile);
   if (!canCurrentUserAct(selected)) return;
   els.saveTypeBtn.className = "saveTypeBtn update";
-  els.saveTypeBtn.textContent = "Update Type";
+  els.saveTypeBtn.textContent = "Update";
+  els.saveTypeBtn.title = "Update conversation type";
 });
 
 els.saveTypeBtn.addEventListener("click", async () => {
@@ -1196,7 +1206,7 @@ els.drawerSave.addEventListener("click", async () => {
   if (state.drawerMode === "New Conversation") {
     const mobile = cleanConversationMobile(fieldValue("Mobile Number"));
     const message = fieldValue("Message");
-    if (mobile.length < 10) {
+    if (mobile.length !== 12 || !mobile.startsWith("91")) {
       showToast("Enter a valid mobile number");
       return;
     }
@@ -1208,7 +1218,7 @@ els.drawerSave.addEventListener("click", async () => {
     await fetchJson(`/api/conversations/${encodeURIComponent(mobile)}/ownership`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ reopen: true }),
     });
     await fetchJson(`/api/conversations/${encodeURIComponent(mobile)}/messages`, {
       method: "POST",

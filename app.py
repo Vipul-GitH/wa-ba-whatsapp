@@ -1322,14 +1322,16 @@ def take_ownership(mobile):
     if error:
         return error
     normalized = normalize_mobile(mobile)
+    data = request.get_json(silent=True) or {}
+    reopen = bool(data.get("reopen"))
     if not normalized:
         return jsonify(ok=False, error="Mobile missing"), 400
     with db_connection() as conn:
         with conn.cursor() as cursor:
             old_state = ensure_conversation_state(cursor, normalized)
-            if old_state.get("status") == "closed":
+            if old_state.get("status") == "closed" and not reopen:
                 return jsonify(ok=False, error="Conversation is closed"), 400
-            if old_state.get("owner_user_id") and old_state.get("owner_user_id") != user["id"]:
+            if old_state.get("owner_user_id") and old_state.get("owner_user_id") != user["id"] and not reopen:
                 return jsonify(ok=False, error=f"Already owned by {old_state.get('owner_name') or 'another user'}"), 409
             cursor.execute(
                 """
@@ -1342,11 +1344,12 @@ def take_ownership(mobile):
             log_conversation_action(
                 cursor,
                 normalized,
-                "take_ownership",
+                "reopen_conversation" if old_state.get("status") == "closed" else "take_ownership",
                 user,
                 old_state=old_state,
                 new_owner=user,
                 new_value=user["display_name"],
+                reason="New conversation started" if old_state.get("status") == "closed" else "",
             )
             cursor.execute("SELECT * FROM conversation_state WHERE mobile = %s", (normalized,))
             state_row = cursor.fetchone()
